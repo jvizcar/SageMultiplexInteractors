@@ -19,7 +19,7 @@ from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder
 
-from ipywidgets import interact, fixed, Dropdown, FloatSlider, IntSlider, SelectMultiple, Text, Checkbox
+from ipywidgets import interact, fixed, Dropdown, FloatSlider, IntSlider, SelectMultiple, Text, Checkbox, Layout
 import ipywidgets as widgets
 
 rcParams['xtick.labelsize'] = 18
@@ -41,7 +41,7 @@ COLOR_LABEL = (
 
 
 class ObjectTypeClass:
-    def __init__(self, ometif_filepath, mask_filepath, region, csv_filepath, predictions=None, frame=0,
+    def __init__(self, ometif_filepath, mask_filepath, region, csv_filepath, predictions=None,
                  chname_filepath=None, pred_filepaths=None, markers_filepath=None, ft_importance_filepaths=None):
         """Initialize the object by providing an image and cell mask in numpy format and a filepath to the csv file
         with the labels.
@@ -109,13 +109,10 @@ class ObjectTypeClass:
             self.idx_map[cellid] = label
             self.label_map[label].append(cellid)
 
-        self.predictions = []
-        if predictions is not None:
-            for filepath in predictions:
-                self.add_prediction(filepath)
-
-        # calculate the mean marker intensity for each nuclei
-        # self.marker_df = self.add_marker_feature()
+        # self.predictions = []
+        # if predictions is not None:
+        #     for filepath in predictions:
+        #         self.add_prediction(filepath)
 
         # add channel names dict or set it to None
         self.chnames = None
@@ -171,63 +168,21 @@ class ObjectTypeClass:
 
             self.chnames = chname_dict
 
-
-
-    def _visualize(self, label, alpha):
-        """Visualize the image and mask with selecting cell types."""
-        overlay = np.zeros((self.im.shape[0], self.im.shape[1], 4), dtype=np.uint8)
-        overlay[np.isin(self.mask, self.label_map[label])] = (255, 0, 0, 255)
-
-        fig, ax = plt.subplots(figsize=(10,10))
-        ax.imshow(self.im, cmap='gray')
-        ax.imshow(overlay, alpha=alpha)
-        ax.xaxis.set_visible(False)
-        ax.yaxis.set_visible(False)
-        plt.show()
-
     def visualize_interact(self):
+        """Visualize the selected small region, allow highlighting the cell types."""
+        def _visualize(label, alpha):
+            overlay = np.zeros((self.im.shape[0], self.im.shape[1], 4), dtype=np.uint8)
+            overlay[np.isin(self.mask, self.label_map[label])] = (255, 0, 0, 255)
+
+            fig, ax = plt.subplots(figsize=(10, 10))
+            ax.imshow(self.im, cmap='gray')
+            ax.imshow(overlay, alpha=alpha)
+            ax.xaxis.set_visible(False)
+            ax.yaxis.set_visible(False)
+            plt.show()
+
         _ = interact(
-            self._visualize,
-            label=Dropdown(options=self.labels, value=self.labels[0], description='Label'),
-            alpha=FloatSlider(value=0.5, min=0, max=1, step=0.1, description='Opacity', continuous_update=False)
-        )
-
-    def add_prediction(self, filepath):
-        """Given a second csv file with different predictions for the cells - add to the object."""
-        df = read_csv(filepath)
-        idx_map = {}
-        label_map = {label: [] for label in self.labels}
-        for label, cellid in zip(df.Label, df.CellID):
-            idx_map[cellid] = label
-            label_map[label].append(cellid)
-
-        self.predictions.append({'idx_map': idx_map, 'df': df, 'label_map': label_map})
-
-    def _visualize_pred(self, label, idx=0, alpha=0.5):
-        """Visualize the image and mask with selecting cell types and add a prediction overlay."""
-        list1_as_set = set(self.label_map[label])
-        intersection = list1_as_set.intersection(self.predictions[idx]['label_map'][label])
-
-        mask = np.zeros((self.im.shape[0], self.im.shape[1], 4), dtype=np.uint8)
-        mask[np.isin(self.mask, self.label_map[label])] = (255, 0, 0, 255)
-        mask[np.isin(self.mask, list(intersection))] = (0, 255, 0, 255)
-
-        cellids = set(np.unique(self.mask))
-        labelids = cellids.intersection(self.label_map[label])
-        trueids = labelids.intersection(self.predictions[idx]['label_map'][label])
-        print('Accuracy %.2f percent' % (len(trueids) / len(labelids) * 100))
-
-        fig, ax = plt.subplots(figsize=(10, 10))
-        ax.imshow(self.im, cmap='gray')
-        ax.imshow(mask, alpha=alpha)
-        ax.xaxis.set_visible(False)
-        ax.yaxis.set_visible(False)
-        plt.show()
-
-    def visualize_pred_interact(self, idx):
-        _ = interact(
-            self._visualize_pred,
-            idx=fixed(idx),
+            _visualize,
             label=Dropdown(options=self.labels, value=self.labels[0], description='Label'),
             alpha=FloatSlider(value=0.5, min=0, max=1, step=0.1, description='Opacity', continuous_update=False)
         )
@@ -382,108 +337,6 @@ class ObjectTypeClass:
                                 continuous_update=False)
         )
 
-    def predict_labels(self, name, features, forest_rs=64, split_rs=64, full=True, test_size=0.2, n_estimators=250):
-        """Predict the labels using a set of features defined by the features list and added to prediction attribute
-        key name. Also, calculate the feature importance. The prediction model used is random forest.
-
-        The full parameter referes to using the data from the source csv file or only from the nuclei in the image
-        region provided.
-        """
-        df = self.df_full if full else self.df
-
-        # initate the random forest classifier
-        forest = ExtraTreesClassifier(n_estimators=n_estimators, random_state=forest_rs)
-
-        # extract the features array and label vector
-        x = df[features]
-        y = df['Label'].tolist()
-
-        # split the feature array and label vector into training and testing parts
-        train_x, test_x, train_y, test_y = train_test_split(x, y, test_size=test_size, stratify=y,
-                                                            random_state=split_rs)
-
-        # fit the training data to random forest classifier (train)
-        forest.fit(train_x, train_y)
-
-        # get the feature importances
-        importances = forest.feature_importances_
-        std = np.std([tree.feature_importances_ for tree in forest.estimators_], axis=0)
-        indices = np.argsort(importances)[::-1]  # feature indices sorted from most important to least important
-
-        # predict the probabilities on the test dataset
-        y_prob = forest.predict_proba(test_x)
-
-        # calculate the accuracy - print it out
-        test_acc = forest.score(test_x, test_y)
-        print(f'Accuracy on testing dataset for {name}: %.2f' % test_acc)
-
-        # calculate the best accuracy (dummy classifier) from always classifying the most common class
-        uniques = {}
-        for _y in test_y:
-            if _y not in uniques:
-                uniques[_y] = 0
-            uniques[_y] += 1
-        max_count = max([count for count in uniques.values()])
-        dummy_acc = max_count / len(test_y)
-        print(f'\tThe dummy accuracy is %.2f' % dummy_acc)
-
-        # one hot encode the labels for the testing dataset
-        enc = OneHotEncoder(handle_unknown='ignore')
-        onehot_labels = enc.fit_transform(np.reshape(test_y, (-1, 1))).toarray()
-
-        # check that the forest and one hot encoder use the same order of labels
-        if not np.all(enc.categories_ == forest.classes_):
-            raise Exception('The one hot encoder and forest classifier are not using the same label order!')
-
-        # calculate the axis for the ROC plot
-        # source: https://scikit-learn.org/stable/auto_examples/model_selection/plot_roc.html
-        fpr = dict()
-        tpr = dict()
-        roc_auc = dict()
-        for i in range(onehot_labels.shape[1]):
-            fpr[i], tpr[i], _ = roc_curve(onehot_labels[:, i], y_prob[:, i])
-            roc_auc[i] = auc(fpr[i], tpr[i])
-
-        # Compute micro-average ROC curve and ROC area
-        fpr["micro"], tpr["micro"], _ = roc_curve(onehot_labels.ravel(), y_prob.ravel())
-        roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
-
-        # save the results
-        self.forests[name] = {
-            'y_prob': y_prob,
-            'importances': importances,
-            'std': std,
-            'indices': indices,
-            'features': features,
-            'y_test': test_y,
-            'test_acc': test_acc,
-            'fpr': fpr,
-            'tpr': tpr,
-            'roc_auc': roc_auc
-        }
-
-    def plot_roc(self, names):
-        """Plot the ROC curve for predicted label sets."""
-        plt.figure(figsize=(10,10))
-        lw = 2
-
-        for i, name in enumerate(names):
-            fpr = self.forests[name]['fpr']
-            tpr = self.forests[name]['tpr']
-            roc_auc = self.forests[name]['roc_auc']
-
-            plt.plot(fpr[2], tpr[2], color=COLOR_NAMES[i],
-                     lw=lw, label=f'{name} (AUC: %0.2f)' % roc_auc[2])
-
-        plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
-        plt.xlim([0.0, 1.0])
-        plt.ylim([0.0, 1.05])
-        plt.xlabel('False Positive Rate', fontsize=18)
-        plt.ylabel('True Positive Rate', fontsize=18)
-        plt.title('Receiver operating characteristic example')
-        plt.legend(loc="lower right", fontsize=18)
-        plt.show()
-
     def plot_class_roc(self, names, class_name):
         """Plot the ROC curve a list of predicted labels. Use the probabilities of the ground truth instead of the
         probabilities of the predictions."""
@@ -545,20 +398,6 @@ class ObjectTypeClass:
                                 style={'description_width': 'initial'})
         )
 
-    def interact_roc(self):
-        """Use an interactor to select which ROC curves to display."""
-        # get all possible predicted labels
-        names = list(self.forests.keys())
-
-        if len(names) == 0:
-            raise Exception('You have not predicted any labels, call the predict_labels function!')
-
-        _ = interact(
-            self.plot_roc,
-            names=SelectMultiple(options=names, value=names, description='Predicted Labels:',
-                                 style={'description_width': 'initial'})
-        )
-
     def plot_ft_importance(self, names, fig_height=5, max_features=100):
         """Plot the feature importance for each prediction using subplots."""
         # calculate the grid shape, limited to a max of 3 columns and as many rows as needed
@@ -613,7 +452,9 @@ class ObjectTypeClass:
 
         _ = interact(
             self.plot_ft_importance,
-            names=SelectMultiple(options=names, value=names, description='Predicted Labels:',
+            names=SelectMultiple(options=names, value=names,
+                                 description='Predicted Labels (hold control to select multiple):',
+                                 layout=Layout(width='500px'),
                                  style={'description_width': 'initial'}),
             fig_height=IntSlider(min=5, max=20, step=5, value=5, description='Subplot height:',
                                  style={'description_width': 'initial'}, continuous_update=False),
@@ -658,8 +499,10 @@ class ObjectTypeClass:
         _ = interact(
             self.plot_marker_ft_comparison,
             feature=Dropdown(options=self.features, value=self.features[0], description='Feature:'),
-            markers=SelectMultiple(options=self.markers, value=[self.markers[0]], description='Select markers:',
-                                   style={'description_width': 'initial'}),
+            markers=SelectMultiple(options=self.markers, value=[self.markers[0]],
+                                   description='Select markers (hold control to select multiple):',
+                                   style={'description_width': 'initial'},
+                                   layout=Layout(width='500px')),
             sample=FloatSlider(value=0.1, min=0.05, max=1.0, step=0.05, description='Frac. nuclei sampled:',
                                style={'description_width': 'initial'}, continuous_update=False)
         )
@@ -724,7 +567,9 @@ class ObjectTypeClass:
     def interact_hm_ft_vs_markers(self):
         """Interact for showing heatmaps for marker vs features."""
         a = Dropdown(options=self.features, value=self.features[0], description='Feature:')
-        b = SelectMultiple(options=self.markers, value=[self.markers[0]], description='Select markers:',
+        b = SelectMultiple(options=self.markers, value=[self.markers[0]],
+                           description='Select markers (hold control to select multiple):',
+                           layout=Layout(width='500px'),
                            style={'description_width': 'initial'})
         col1 = widgets.VBox([a, b])
 
@@ -748,3 +593,159 @@ class ObjectTypeClass:
                                          {'feature': a, 'markers': b, 'xbins': c, 'ybins': d, 'xmin_f': e, 'xmax_f': f,
                                           'ymin_f': g, 'ymax_f': h})
         display(ui, out)
+
+    # def interact_roc(self):
+    #     """Use an interactor to select which ROC curves to display."""
+    #     # get all possible predicted labels
+    #     names = list(self.forests.keys())
+    #
+    #     if len(names) == 0:
+    #         raise Exception('You have not predicted any labels, call the predict_labels function!')
+    #
+    #     _ = interact(
+    #         self.plot_roc,
+    #         names=SelectMultiple(options=names, value=names, description='Predicted Labels:',
+    #                              style={'description_width': 'initial'})
+    #     )
+
+    # def add_prediction(self, filepath):
+    #     """Given a second csv file with different predictions for the cells - add to the object."""
+    #     df = read_csv(filepath)
+    #     idx_map = {}
+    #     label_map = {label: [] for label in self.labels}
+    #     for label, cellid in zip(df.Label, df.CellID):
+    #         idx_map[cellid] = label
+    #         label_map[label].append(cellid)
+    #
+    #     self.predictions.append({'idx_map': idx_map, 'df': df, 'label_map': label_map})
+
+    # def _visualize_pred(self, label, idx=0, alpha=0.5):
+    #     """Visualize the image and mask with selecting cell types and add a prediction overlay."""
+    #     list1_as_set = set(self.label_map[label])
+    #     intersection = list1_as_set.intersection(self.predictions[idx]['label_map'][label])
+    #
+    #     mask = np.zeros((self.im.shape[0], self.im.shape[1], 4), dtype=np.uint8)
+    #     mask[np.isin(self.mask, self.label_map[label])] = (255, 0, 0, 255)
+    #     mask[np.isin(self.mask, list(intersection))] = (0, 255, 0, 255)
+    #
+    #     cellids = set(np.unique(self.mask))
+    #     labelids = cellids.intersection(self.label_map[label])
+    #     trueids = labelids.intersection(self.predictions[idx]['label_map'][label])
+    #     print('Accuracy %.2f percent' % (len(trueids) / len(labelids) * 100))
+    #
+    #     fig, ax = plt.subplots(figsize=(10, 10))
+    #     ax.imshow(self.im, cmap='gray')
+    #     ax.imshow(mask, alpha=alpha)
+    #     ax.xaxis.set_visible(False)
+    #     ax.yaxis.set_visible(False)
+    #     plt.show()
+    #
+    # def visualize_pred_interact(self, idx):
+    #     _ = interact(
+    #         self._visualize_pred,
+    #         idx=fixed(idx),
+    #         label=Dropdown(options=self.labels, value=self.labels[0], description='Label'),
+    #         alpha=FloatSlider(value=0.5, min=0, max=1, step=0.1, description='Opacity', continuous_update=False)
+    #     )
+
+    # def predict_labels(self, name, features, forest_rs=64, split_rs=64, full=True, test_size=0.2, n_estimators=250):
+    #     """Predict the labels using a set of features defined by the features list and added to prediction attribute
+    #     key name. Also, calculate the feature importance. The prediction model used is random forest.
+    #
+    #     The full parameter referes to using the data from the source csv file or only from the nuclei in the image
+    #     region provided.
+    #     """
+    #     df = self.df_full if full else self.df
+    #
+    #     # initate the random forest classifier
+    #     forest = ExtraTreesClassifier(n_estimators=n_estimators, random_state=forest_rs)
+    #
+    #     # extract the features array and label vector
+    #     x = df[features]
+    #     y = df['Label'].tolist()
+    #
+    #     # split the feature array and label vector into training and testing parts
+    #     train_x, test_x, train_y, test_y = train_test_split(x, y, test_size=test_size, stratify=y,
+    #                                                         random_state=split_rs)
+    #
+    #     # fit the training data to random forest classifier (train)
+    #     forest.fit(train_x, train_y)
+    #
+    #     # get the feature importances
+    #     importances = forest.feature_importances_
+    #     std = np.std([tree.feature_importances_ for tree in forest.estimators_], axis=0)
+    #     indices = np.argsort(importances)[::-1]  # feature indices sorted from most important to least important
+    #
+    #     # predict the probabilities on the test dataset
+    #     y_prob = forest.predict_proba(test_x)
+    #
+    #     # calculate the accuracy - print it out
+    #     test_acc = forest.score(test_x, test_y)
+    #     print(f'Accuracy on testing dataset for {name}: %.2f' % test_acc)
+    #
+    #     # calculate the best accuracy (dummy classifier) from always classifying the most common class
+    #     uniques = {}
+    #     for _y in test_y:
+    #         if _y not in uniques:
+    #             uniques[_y] = 0
+    #         uniques[_y] += 1
+    #     max_count = max([count for count in uniques.values()])
+    #     dummy_acc = max_count / len(test_y)
+    #     print(f'\tThe dummy accuracy is %.2f' % dummy_acc)
+    #
+    #     # one hot encode the labels for the testing dataset
+    #     enc = OneHotEncoder(handle_unknown='ignore')
+    #     onehot_labels = enc.fit_transform(np.reshape(test_y, (-1, 1))).toarray()
+    #
+    #     # check that the forest and one hot encoder use the same order of labels
+    #     if not np.all(enc.categories_ == forest.classes_):
+    #         raise Exception('The one hot encoder and forest classifier are not using the same label order!')
+    #
+    #     # calculate the axis for the ROC plot
+    #     # source: https://scikit-learn.org/stable/auto_examples/model_selection/plot_roc.html
+    #     fpr = dict()
+    #     tpr = dict()
+    #     roc_auc = dict()
+    #     for i in range(onehot_labels.shape[1]):
+    #         fpr[i], tpr[i], _ = roc_curve(onehot_labels[:, i], y_prob[:, i])
+    #         roc_auc[i] = auc(fpr[i], tpr[i])
+    #
+    #     # Compute micro-average ROC curve and ROC area
+    #     fpr["micro"], tpr["micro"], _ = roc_curve(onehot_labels.ravel(), y_prob.ravel())
+    #     roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
+    #
+    #     # save the results
+    #     self.forests[name] = {
+    #         'y_prob': y_prob,
+    #         'importances': importances,
+    #         'std': std,
+    #         'indices': indices,
+    #         'features': features,
+    #         'y_test': test_y,
+    #         'test_acc': test_acc,
+    #         'fpr': fpr,
+    #         'tpr': tpr,
+    #         'roc_auc': roc_auc
+    #     }
+    #
+    # def plot_roc(self, names):
+    #     """Plot the ROC curve for predicted label sets."""
+    #     plt.figure(figsize=(10,10))
+    #     lw = 2
+    #
+    #     for i, name in enumerate(names):
+    #         fpr = self.forests[name]['fpr']
+    #         tpr = self.forests[name]['tpr']
+    #         roc_auc = self.forests[name]['roc_auc']
+    #
+    #         plt.plot(fpr[2], tpr[2], color=COLOR_NAMES[i],
+    #                  lw=lw, label=f'{name} (AUC: %0.2f)' % roc_auc[2])
+    #
+    #     plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+    #     plt.xlim([0.0, 1.0])
+    #     plt.ylim([0.0, 1.05])
+    #     plt.xlabel('False Positive Rate', fontsize=18)
+    #     plt.ylabel('True Positive Rate', fontsize=18)
+    #     plt.title('Receiver operating characteristic example')
+    #     plt.legend(loc="lower right", fontsize=18)
+    #     plt.show()

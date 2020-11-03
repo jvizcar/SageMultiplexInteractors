@@ -35,5 +35,5 @@ USER jovyan
 # switch the working directory to notebook dir
 WORKDIR /code/notebooks
 
-# trust the notebooks
-# jupyter trust path_to_notebook   (do for each)
+# trust the notebooks to avoid warning poping up
+RUN jupyter trust /code/notebooks/CellType_Interactors.ipynb
