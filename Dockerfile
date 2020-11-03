@@ -25,7 +25,8 @@ RUN mkdir /home/jovyan/.jupyter/custom
 RUN echo '.container {width:100% !important;}' > /home/jovyan/.jupyter/custom/custom.css
 
 # add the code of this repository to /code directory
-ADD . /code
+ADD notebooks /code/notebooks
+ADD utils /code/utils
 
 # open up permisssions to /code again
 USER root

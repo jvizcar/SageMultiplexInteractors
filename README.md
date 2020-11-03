@@ -11,7 +11,7 @@ notebooks outside of a Docker container so long as you configure the paths appro
 To run with a Docker container use the following command which allows you to port-forward the Jupyter notebook port 
 locally and to mount your data dir which should be mount to /data in the Docker container.
 
-```docker run -it --rm -p####:8888 -v <data_dir>:/data jvizcar/####:latest```
+```docker run -it --rm -p####:8888 -v <data_dir>:/data jvizcar/sage_multiplex_interactors:latest```
 
 Make sure to fill #### with the local port you want to port-forward to - the token password will be displayed in the 
 terminal, copy paste this to access the notebook. <data_dir> should be the absolute path to your directory containing
