@@ -1,5 +1,5 @@
 # Sage Multiplex Image Interactors
-3 Nov. 2020
+10 Nov. 2020
 
 Provides Jupyter notebooks that are aimed at providing interactive visualization of multiplex images themsevles and
 analysis results on those images.
@@ -16,3 +16,5 @@ locally and to mount your data dir which should be mount to /data in the Docker 
 Make sure to fill #### with the local port you want to port-forward to - the token password will be displayed in the 
 terminal, copy paste this to access the notebook. <data_dir> should be the absolute path to your directory containing
 all the images, image dirs, masks, and csv files.
+
+Look into the configs_example.py file to understand the required files you will need to run the notebooks.
