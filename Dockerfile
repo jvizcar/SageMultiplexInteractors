@@ -33,8 +33,12 @@ USER root
 RUN chmod 777 -R /code
 USER jovyan
 
+# install cellpose
+RUN pip install cellpose
+
 # switch the working directory to notebook dir
 WORKDIR /code/notebooks
 
 # trust the notebooks to avoid warning poping up
 RUN jupyter trust /code/notebooks/CellType_Interactors.ipynb
+RUN jupyter trust /code/notebooks/NucleiSegmentation_Interactors.ipynb

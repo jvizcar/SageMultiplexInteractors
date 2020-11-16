@@ -53,8 +53,8 @@ def _create_button_text_display(default_value):
 
 
 class ObjectTypeClass:
-    def __init__(self, ometif_filepath, mask_filepath, region, csv_filepath, predictions=None,
-                 chname_filepath=None, pred_filepaths=None, markers_filepath=None, ft_importance_filepaths=None,
+    def __init__(self, ometif_filepath, mask_filepath, csv_filepath, predictions=None,
+                 region=None, chname_filepath=None, pred_filepaths=None, markers_filepath=None, ft_importance_filepaths=None,
                  save_dir='/data/Figures'):
         """Initialize the object by providing an image and cell mask in numpy format and a filepath to the csv file
         with the labels.
@@ -68,8 +68,6 @@ class ObjectTypeClass:
             filepath to ome.tif
         mask_filepath : str
             filepath to object (nuclei) mask for the ome.tif
-        region : dict
-            dictionary with left, top, width, and height keys for the small region to use for visualization
         csv_filepath : str
             filepath to csv file with object (nuclei) class labels and features
         chname_filepath : str
@@ -85,23 +83,35 @@ class ObjectTypeClass:
             label
         save_dir : str (default: '/data/Figures')
             the directory to save figures to from the interactors
+        region : dict (default: None)
+            dictionary with left, top, width, and height keys for the small region to use for visualization. If None is
+            passed then the region left: 0, top: 0, width: 500, and height: 500 will be used. Note that the interactor
+            for viewing the region will change the region used by all interactors, this just sets the initialization
+            region.
 
         """
         # initialize the fields
         self.ts = large_image.getTileSource(ometif_filepath)
         self.mask_full = imread(mask_filepath)  # this is the mask for the entire ome.tif
 
+        # check region, set to default if None
+        if region is None:
+            self.region = {'left': 0, 'top': 0, 'width': 500, 'height': 500}
+        else:
+            self.region = region
+
         self.mask = self.mask_full[
-                    region['top']:region['top']+region['height'], region['left']:region['left']+region['width']
+                    self.region['top']:self.region['top']+self.region['height'],
+                    self.region['left']:self.region['left']+self.region['width']
                     ]
 
         # the image will be frame 0 which is assumed to be one of the DAPI channels
-        self.kwargs = {'format': large_image.tilesource.TILE_FORMAT_NUMPY, 'frame': 0, 'region': region}
-        im = normalize_image(self.ts.getRegion(**self.kwargs)[0][:, :, 0])
+        self.kwargs = {'format': large_image.tilesource.TILE_FORMAT_NUMPY, 'frame': 0, 'region': self.region}
+        im = self.ts.getRegion(**self.kwargs)[0][:, :, 0]
         self.im = im
+
         df = read_csv(csv_filepath)
         self.df_full = df.copy()
-        self.forests = {}  # save the results of prediction labels using random forest classifiers
 
         # remove the rows that do not appear in this mask
         cell_ids = np.unique(self.mask)
@@ -159,62 +169,6 @@ class ObjectTypeClass:
         self.save_dir = save_dir
         makedirs(save_dir, exist_ok=True)
 
-    def interact_ometif(self):
-        """Interactor for visualizing the ome.tif file at low resolution and an associated region."""
-
-        def _interact_ometif(frame, left, top, width, height):
-            button, text = _create_button_text_display('ometif_region.png')
-
-            # get the region at 1.25x resolution for frame 0
-            lr_im = self.ts.getRegion(format=large_image.tilesource.TILE_FORMAT_NUMPY, scale={'magnification': 1.25},
-                                      frame=self.chnames[frame])[0][:, :, 0]
-
-            fig, ax = plt.subplots(ncols=2, figsize=(15, 10))
-
-            ax[0].imshow(lr_im, cmap='gray')
-            ax[0].set_title(f'ome.tif channel {frame} at 1.25X magnification', fontsize=18)
-            ax[0].xaxis.set_visible(False)
-            ax[0].yaxis.set_visible(False)
-
-            # get and plot region at full resolution
-            region = {'left': left, 'top': top, 'width': width, 'height': height}
-
-            reg_im = self.ts.getRegion(
-                format=large_image.tilesource.TILE_FORMAT_NUMPY, region=region, frame=self.chnames[frame]
-            )[0][:, :, 0]
-
-            ax[1].imshow(reg_im, cmap='gray')
-            ax[1].set_title('Image region at full magnification', fontsize=18)
-            ax[1].xaxis.set_visible(False)
-            ax[1].yaxis.set_visible(False)
-            plt.suptitle('View OME.TIF at low magnification and select region to view at full mag', fontweight='bold',
-                         fontsize=20)
-            fig.tight_layout()
-            plt.show()
-
-            button.on_click(partial(self.on_button_clicked, text_widget=text, fig_to_save=fig))
-            display(widgets.HBox([text, button]))
-
-        chnames = list(self.chnames.keys())
-        a = Dropdown(options=chnames, value=chnames[0], description='Channel:', style=DESC_STYLES)
-        b = IntSlider(min=0, max=self.ts.getMetadata()['sizeX'], value=0, description='Region left coord:',
-                      style=DESC_STYLES, continuous_update=False)
-        c = IntSlider(min=0, max=self.ts.getMetadata()['sizeY'], value=0, description='Region top coord:',
-                      style=DESC_STYLES, continuous_update=False)
-        d = IntSlider(min=100, max=5000, value=1000, description='Region width:', style=DESC_STYLES,
-                      continuous_update=False)
-        e = IntSlider(min=100, max=5000, value=1000, description='Region height:', style=DESC_STYLES,
-                      continuous_update=False)
-
-        row1 = widgets.HBox([a])
-        row2 = widgets.HBox([b, c])
-        row3 = widgets.HBox([d, e])
-        ui = widgets.VBox([row1, row2, row3])
-
-        out = widgets.interactive_output(_interact_ometif, {'frame': a, 'left': b, 'top': c, 'width': d, 'height': e})
-
-        display(ui, out)
-
     def on_button_clicked(self, b, text_widget=None, fig_to_save=None):
         filename = text_widget.value
         if filename.endswith(('.png', '.jpg', '.jpeg')):
@@ -252,6 +206,93 @@ class ObjectTypeClass:
                     chname_dict[line.strip()] = i
 
             self.chnames = chname_dict
+
+    def interact_ometif(self):
+        """Interactor for visualizing the ome.tif file at low resolution and an associated region."""
+
+        def _interact_ometif(frame, left, top, width, height):
+
+            """The whole section below needs to be moved into its own function....for future reference"""
+            # reset the region based on the interactor values
+            self.region = {'left': left, 'top': top, 'width': width, 'height': height}
+            self.mask = self.mask_full[
+                        self.region['top']:self.region['top'] + self.region['height'],
+                        self.region['left']:self.region['left'] + self.region['width']
+                        ]
+
+            # remove the rows that do not appear in this mask
+            cell_ids = np.unique(self.mask)
+            self.df = self.df_full[self.df_full.CellID.isin(cell_ids)].reset_index(drop=True)
+
+            self.features = self.df.columns.tolist()
+            del self.features[self.features.index('CellID')]
+            del self.features[self.features.index('Label')]
+
+            # delete the column with label names
+            for label in self.labels:
+                del self.features[self.features.index(label)]
+
+            self.idx_map = {}
+            self.label_map = {label: [] for label in self.labels}
+            for label, cellid in zip(self.df.Label, self.df.CellID):
+                self.idx_map[cellid] = label
+                self.label_map[label].append(cellid)
+
+            self.kwargs = {'format': large_image.tilesource.TILE_FORMAT_NUMPY, 'frame': 0, 'region': self.region}
+            self.im = self.ts.getRegion(**self.kwargs)[0][:, :, 0]
+            """This is the end of the snippet that needs to be changed into a function or optimized"""
+
+            button, text = _create_button_text_display('ometif_region.png')
+
+            # get the region at 1.25x resolution for frame 0
+            lr_im = self.ts.getRegion(format=large_image.tilesource.TILE_FORMAT_NUMPY, scale={'magnification': 1.25},
+                                      frame=self.chnames[frame])[0][:, :, 0]
+
+            fig, ax = plt.subplots(ncols=2, figsize=(15, 10))
+
+            ax[0].imshow(lr_im, cmap='gray')
+            ax[0].set_title(f'ome.tif channel {frame} at 1.25X magnification', fontsize=18)
+            ax[0].xaxis.set_visible(False)
+            ax[0].yaxis.set_visible(False)
+
+            # get and plot region at full resolution
+            region = {'left': left, 'top': top, 'width': width, 'height': height}
+
+            reg_im = self.ts.getRegion(
+                format=large_image.tilesource.TILE_FORMAT_NUMPY, region=region, frame=self.chnames[frame]
+            )[0][:, :, 0]
+
+            ax[1].imshow(reg_im, cmap='gray')
+            ax[1].set_title('Image region at full magnification', fontsize=18)
+            ax[1].xaxis.set_visible(False)
+            ax[1].yaxis.set_visible(False)
+            plt.suptitle('View OME.TIF at low magnification and select region to view at full mag', fontweight='bold',
+                         fontsize=20)
+            fig.tight_layout()
+            plt.show()
+
+            button.on_click(partial(self.on_button_clicked, text_widget=text, fig_to_save=fig))
+            display(widgets.HBox([text, button]))
+
+        chnames = list(self.chnames.keys())
+        a = Dropdown(options=chnames, value=chnames[0], description='Channel:', style=DESC_STYLES)
+        b = IntSlider(min=0, max=self.ts.getMetadata()['sizeX'], value=self.region['left'],
+                      description='Region left coord:', style=DESC_STYLES, continuous_update=False)
+        c = IntSlider(min=0, max=self.ts.getMetadata()['sizeY'], value=self.region['top'],
+                      description='Region top coord:', style=DESC_STYLES, continuous_update=False)
+        d = IntSlider(min=100, max=5000, value=self.region['width'], description='Region width:', style=DESC_STYLES,
+                      continuous_update=False)
+        e = IntSlider(min=100, max=5000, value=self.region['height'], description='Region height:', style=DESC_STYLES,
+                      continuous_update=False)
+
+        row1 = widgets.HBox([a])
+        row2 = widgets.HBox([b, c])
+        row3 = widgets.HBox([d, e])
+        ui = widgets.VBox([row1, row2, row3])
+
+        out = widgets.interactive_output(_interact_ometif, {'frame': a, 'left': b, 'top': c, 'width': d, 'height': e})
+
+        display(ui, out)
 
     def interact_region_celltypes(self):
         """Visualize the selected small region, allow highlighting the cell types."""

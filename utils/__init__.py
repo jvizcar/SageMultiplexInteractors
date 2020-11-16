@@ -1,3 +1,2 @@
-from .ObjectClass import ObjectClass
-from .ObjectsClass import ObjectsClass
+from .ObjectSegClass import ObjectSegClass
 from .ObjectTypeClass import ObjectTypeClass
